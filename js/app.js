@@ -305,10 +305,10 @@ function renderSummaryRecords(tab) {
   
   let records = appData.records.filter(record => {
     const recordDate = new Date(record.timestamp);
-    
+
     if (tab === 'reward') return record.stars > 0 && recordDate >= monthStart;
     if (tab === 'exchange') return record.stars < 0 && recordDate >= monthStart && record.type === 'exchange';
-    if (tab === 'deduct') return record.stars < 0 && recordDate >= monthStart && record.type === 'deduct';
+    if (tab === 'deduct') return record.stars < 0 && recordDate >= monthStart && (record.type === 'deduct' || (record.type === 'reward' && record.taskName));
     return false;
   });
   
@@ -566,45 +566,93 @@ function renderDataStats(tab) {
       </div>
     `;
   } else if (tab === 'exchangeData') {
-    const exchangeRecords = appData.records.filter(record => 
-      record.stars < 0 && 
-      record.timestamp >= monthStart.getTime() && 
+    const exchangeRecords = appData.records.filter(record =>
+      record.stars < 0 &&
+      record.timestamp >= monthStart.getTime() &&
       record.timestamp <= monthEnd.getTime()
     );
-    
+
     const totalStars = exchangeRecords.reduce((sum, r) => sum + Math.abs(r.stars), 0);
-    
-    // 心愿统计
+
+    // 区分兑换和扣分任务
     const wishData = {};
+    const taskData = {};
+
     exchangeRecords.forEach(record => {
-      const key = record.wishName || '其他';
-      if (!wishData[key]) {
-        wishData[key] = { count: 0, stars: 0 };
+      if (record.type === 'exchange' && record.wishName) {
+        // 兑换心愿
+        const key = record.wishName;
+        if (!wishData[key]) {
+          wishData[key] = { count: 0, stars: 0 };
+        }
+        wishData[key].count++;
+        wishData[key].stars += Math.abs(record.stars);
+      } else if (record.type === 'reward' && record.taskName) {
+        // 扣分任务
+        const key = record.taskName;
+        if (!taskData[key]) {
+          taskData[key] = { count: 0, stars: 0 };
+        }
+        taskData[key].count++;
+        taskData[key].stars += Math.abs(record.stars);
+      } else if (record.type === 'deduct' && record.note) {
+        // 手动扣减
+        const key = record.note;
+        if (!taskData[key]) {
+          taskData[key] = { count: 0, stars: 0 };
+        }
+        taskData[key].count++;
+        taskData[key].stars += Math.abs(record.stars);
       }
-      wishData[key].count++;
-      wishData[key].stars += Math.abs(record.stars);
     });
-    
-    const preferenceHTML = Object.entries(wishData).map(([name, data]) => {
-      const percent = totalStars > 0 ? Math.round((data.stars / totalStars) * 100) : 0;
-      
-      return `
-        <div class="preference-item">
-          <div class="preference-header">
-            <span class="preference-name">${name}</span>
-            <span class="preference-value">${data.stars}颗 (${percent}%)</span>
+
+    // 构建偏好列表
+    const preferenceHTML = [];
+
+    // 先显示兑换心愿
+    if (Object.keys(wishData).length > 0) {
+      preferenceHTML.push('<div class="card-title">兑换心愿</div>');
+      Object.entries(wishData).forEach(([name, data]) => {
+        const percent = totalStars > 0 ? Math.round((data.stars / totalStars) * 100) : 0;
+
+        preferenceHTML.push(`
+          <div class="preference-item">
+            <div class="preference-header">
+              <span class="preference-name">🎁 ${name}</span>
+              <span class="preference-value">${data.stars}颗 (${percent}%)</span>
+            </div>
+            <div class="preference-bar">
+              <div class="preference-fill" style="width: ${percent}%"></div>
+            </div>
           </div>
-          <div class="preference-bar">
-            <div class="preference-fill" style="width: ${percent}%"></div>
+        `);
+      });
+    }
+
+    // 再显示扣分任务
+    if (Object.keys(taskData).length > 0) {
+      preferenceHTML.push('<div class="card-title" style="margin-top:16px;">扣分任务</div>');
+      Object.entries(taskData).forEach(([name, data]) => {
+        const percent = totalStars > 0 ? Math.round((data.stars / totalStars) * 100) : 0;
+
+        preferenceHTML.push(`
+          <div class="preference-item">
+            <div class="preference-header">
+              <span class="preference-name">❌ ${name}</span>
+              <span class="preference-value">${data.stars}颗 (${percent}%)</span>
+            </div>
+            <div class="preference-bar">
+              <div class="preference-fill" style="width: ${percent}%"></div>
+            </div>
           </div>
-        </div>
-      `;
-    }).join('');
-    
+        `);
+      });
+    }
+
     container.innerHTML = `
       <div class="stats-grid">
         <div class="stat-item">
-          <div class="stat-label">兑换次数</div>
+          <div class="stat-label">消耗次数</div>
           <div class="stat-value negative">${exchangeRecords.length}</div>
         </div>
         <div class="stat-item">
@@ -612,10 +660,7 @@ function renderDataStats(tab) {
           <div class="stat-value negative">${totalStars}</div>
         </div>
       </div>
-      <div class="card-title">兑换偏好</div>
-      <div class="preference-list">
-        ${preferenceHTML || '<div class="empty-state-text">暂无数据</div>'}
-      </div>
+      ${preferenceHTML.length > 0 ? `<div class="preference-list">${preferenceHTML.join('')}</div>` : '<div class="empty-state-text">暂无数据</div>'}
     `;
   }
 }
