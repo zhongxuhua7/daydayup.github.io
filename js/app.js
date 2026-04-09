@@ -195,8 +195,38 @@ let currentDataDate = formatDate(new Date());
 function renderHeader() {
   const header = document.getElementById('header');
   const { userInfo } = appData;
-  
-  if (currentPage === 'summary') {
+
+  // 检测是否为 iPad Air 横屏
+  const isLandscape = window.matchMedia('(min-width: 820px) and (orientation: landscape)').matches;
+
+  if (isLandscape) {
+    // 横屏模式：显示侧边导航
+    header.innerHTML = `
+      <div class="header-title">🌟 成长奖励</div>
+      <div class="user-info">
+        ${userInfo.avatar ? `<img src="${userInfo.avatar}" class="avatar" alt="${userInfo.name}" />` : `<div class="avatar">${userInfo.name[0]}</div>`}
+        <span class="user-name">${userInfo.name}</span>
+      </div>
+      <div class="sidebar-nav">
+        <div class="sidebar-nav-item ${currentPage === 'summary' ? 'active' : ''}" onclick="navigateTo('summary')">
+          <span class="sidebar-nav-icon">📊</span>
+          <span>摘要</span>
+        </div>
+        <div class="sidebar-nav-item ${currentPage === 'task' ? 'active' : ''}" onclick="navigateTo('task')">
+          <span class="sidebar-nav-icon">✅</span>
+          <span>任务</span>
+        </div>
+        <div class="sidebar-nav-item ${currentPage === 'data' ? 'active' : ''}" onclick="navigateTo('data')">
+          <span class="sidebar-nav-icon">📈</span>
+          <span>数据</span>
+        </div>
+        <div class="sidebar-nav-item ${currentPage === 'settings' ? 'active' : ''}" onclick="navigateTo('settings')">
+          <span class="sidebar-nav-icon">⚙️</span>
+          <span>设置</span>
+        </div>
+      </div>
+    `;
+  } else if (currentPage === 'summary') {
     header.innerHTML = `
       <div class="user-info">
         ${userInfo.avatar ? `<img src="${userInfo.avatar}" class="avatar" alt="${userInfo.name}" />` : `<div class="avatar">${userInfo.name[0]}</div>`}
@@ -583,55 +613,34 @@ function renderDataStats(tab) {
     `;
   } else if (tab === 'exchangeData') {
     const exchangeRecords = appData.records.filter(record =>
-      record.stars < 0 &&
+      record.type === 'exchange' &&
       record.timestamp >= monthStart.getTime() &&
       record.timestamp <= monthEnd.getTime()
     );
 
     const totalStars = exchangeRecords.reduce((sum, r) => sum + Math.abs(r.stars), 0);
 
-    // 区分兑换和扣分任务
+    // 统计兑换心愿
     const wishData = {};
-    const taskData = {};
 
     exchangeRecords.forEach(record => {
-      if (record.type === 'exchange' && record.wishName) {
-        // 兑换心愿
+      if (record.wishName) {
         const key = record.wishName;
         if (!wishData[key]) {
           wishData[key] = { count: 0, stars: 0 };
         }
         wishData[key].count++;
         wishData[key].stars += Math.abs(record.stars);
-      } else if (record.type === 'reward' && record.taskName) {
-        // 扣分任务
-        const key = record.taskName;
-        if (!taskData[key]) {
-          taskData[key] = { count: 0, stars: 0 };
-        }
-        taskData[key].count++;
-        taskData[key].stars += Math.abs(record.stars);
-      } else if (record.type === 'deduct' && record.note) {
-        // 手动扣减
-        const key = record.note;
-        if (!taskData[key]) {
-          taskData[key] = { count: 0, stars: 0 };
-        }
-        taskData[key].count++;
-        taskData[key].stars += Math.abs(record.stars);
       }
     });
 
     // 构建偏好列表
-    const preferenceHTML = [];
-
-    // 先显示兑换心愿
-    if (Object.keys(wishData).length > 0) {
-      preferenceHTML.push('<div class="card-title">兑换心愿</div>');
-      Object.entries(wishData).forEach(([name, data]) => {
+    const preferenceHTML = Object.entries(wishData)
+      .sort((a, b) => b[1].stars - a[1].stars)
+      .map(([name, data]) => {
         const percent = totalStars > 0 ? Math.round((data.stars / totalStars) * 100) : 0;
 
-        preferenceHTML.push(`
+        return `
           <div class="preference-item">
             <div class="preference-header">
               <span class="preference-name">🎁 ${name}</span>
@@ -641,29 +650,8 @@ function renderDataStats(tab) {
               <div class="preference-fill" style="width: ${percent}%"></div>
             </div>
           </div>
-        `);
-      });
-    }
-
-    // 再显示扣分任务
-    if (Object.keys(taskData).length > 0) {
-      preferenceHTML.push('<div class="card-title" style="margin-top:16px;">扣分任务</div>');
-      Object.entries(taskData).forEach(([name, data]) => {
-        const percent = totalStars > 0 ? Math.round((data.stars / totalStars) * 100) : 0;
-
-        preferenceHTML.push(`
-          <div class="preference-item">
-            <div class="preference-header">
-              <span class="preference-name">❌ ${name}</span>
-              <span class="preference-value">${data.stars}颗 (${percent}%)</span>
-            </div>
-            <div class="preference-bar">
-              <div class="preference-fill" style="width: ${percent}%"></div>
-            </div>
-          </div>
-        `);
-      });
-    }
+        `;
+      }).join('');
 
     container.innerHTML = `
       <div class="stats-grid">
@@ -677,6 +665,60 @@ function renderDataStats(tab) {
         </div>
       </div>
       ${preferenceHTML.length > 0 ? `<div class="preference-list">${preferenceHTML.join('')}</div>` : '<div class="empty-state-text">暂无数据</div>'}
+    `;
+  } else if (tab === 'deductData') {
+    const deductRecords = appData.records.filter(record =>
+      (record.type === 'reward' || record.type === 'deduct') &&
+      record.stars < 0 &&
+      record.timestamp >= monthStart.getTime() &&
+      record.timestamp <= monthEnd.getTime()
+    );
+
+    const totalStars = deductRecords.reduce((sum, r) => sum + Math.abs(r.stars), 0);
+
+    // 统计扣分任务和手动扣减
+    const taskData = {};
+
+    deductRecords.forEach(record => {
+      const key = record.taskName || record.note || '未知原因';
+      if (!taskData[key]) {
+        taskData[key] = { count: 0, stars: 0 };
+      }
+      taskData[key].count++;
+      taskData[key].stars += Math.abs(record.stars);
+    });
+
+    // 构建偏好列表
+    const preferenceHTML = Object.entries(taskData)
+      .sort((a, b) => b[1].stars - a[1].stars)
+      .map(([name, data]) => {
+        const percent = totalStars > 0 ? Math.round((data.stars / totalStars) * 100) : 0;
+
+        return `
+          <div class="preference-item">
+            <div class="preference-header">
+              <span class="preference-name">❌ ${name}</span>
+              <span class="preference-value">${data.stars}颗 (${percent}%)</span>
+            </div>
+            <div class="preference-bar">
+              <div class="preference-fill" style="width: ${percent}%;background-color:var(--danger);"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+    container.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-label">扣减次数</div>
+          <div class="stat-value negative">${deductRecords.length}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">扣减星星</div>
+          <div class="stat-value negative">-${totalStars}</div>
+        </div>
+      </div>
+      ${preferenceHTML.length > 0 ? `<div class="preference-list">${preferenceHTML}</div>` : '<div class="empty-state-text">暂无扣减记录</div>'}
     `;
   }
 }
