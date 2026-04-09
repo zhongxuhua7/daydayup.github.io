@@ -96,60 +96,74 @@ function getStats() {
   const now = new Date();
   const monthStart = getStartOfMonth(now);
   const monthEnd = getEndOfMonth(now);
-  
-  let totalStars = 0;
-  let earnedStars = 0;
-  let spentStars = 0;
-  let rewardCount = 0;
-  let exchangeCount = 0;
-  let monthRewardCount = 0;
-  let monthExchangeCount = 0;
-  let monthEarnedStars = 0;
-  let monthSpentStars = 0;
-  
-  // 分类统计
+
+  // 全局统计
+  let totalRewardStars = 0;      // 总奖励星星
+  let totalDeductStars = 0;      // 总扣减星星
+  let totalExchangeStars = 0;    // 总兑换星星
+
+  // 本月统计
+  let monthRewardCount = 0;      // 本月奖励次数
+  let monthRewardStars = 0;      // 本月奖励星星
+  let monthDeductCount = 0;      // 本月扣减次数
+  let monthDeductStars = 0;      // 本月扣减星星
+  let monthExchangeCount = 0;    // 本月兑换次数
+  let monthExchangeStars = 0;    // 本月兑换星星
+
+  // 分类统计（仅奖励）
   const categoryStats = {};
   appData.categories.forEach(cat => {
     categoryStats[cat.id] = { count: 0, stars: 0 };
   });
-  
+
   appData.records.forEach(record => {
-    totalStars += record.stars;
-    
+    const isMonth = record.timestamp >= monthStart.getTime() && record.timestamp <= monthEnd.getTime();
+
     if (record.stars > 0) {
-      earnedStars += record.stars;
-      rewardCount++;
-      
+      // 奖励（正数）
+      totalRewardStars += record.stars;
+
+      // 分类统计
       if (categoryStats[record.categoryId]) {
         categoryStats[record.categoryId].count++;
         categoryStats[record.categoryId].stars += record.stars;
       }
-      
-      if (record.timestamp >= monthStart.getTime() && record.timestamp <= monthEnd.getTime()) {
+
+      if (isMonth) {
         monthRewardCount++;
-        monthEarnedStars += record.stars;
+        monthRewardStars += record.stars;
+      }
+    } else if (record.type === 'exchange') {
+      // 兑换（type='exchange'）
+      totalExchangeStars += Math.abs(record.stars);
+
+      if (isMonth) {
+        monthExchangeCount++;
+        monthExchangeStars += Math.abs(record.stars);
       }
     } else {
-      spentStars += Math.abs(record.stars);
-      exchangeCount++;
-      
-      if (record.timestamp >= monthStart.getTime() && record.timestamp <= monthEnd.getTime()) {
-        monthExchangeCount++;
-        monthSpentStars += Math.abs(record.stars);
+      // 扣减（type='deduct' 或负数奖励任务）
+      totalDeductStars += Math.abs(record.stars);
+
+      if (isMonth) {
+        monthDeductCount++;
+        monthDeductStars += Math.abs(record.stars);
       }
     }
   });
-  
-  const remainingStars = earnedStars - spentStars;
-  
+
+  const remainingStars = totalRewardStars - totalDeductStars - totalExchangeStars;
+  const monthNet = monthRewardStars - monthDeductStars - monthExchangeStars;
+
   return {
     remainingStars,
     monthRewardCount,
+    monthRewardStars,
+    monthDeductCount,
+    monthDeductStars,
     monthExchangeCount,
-    totalSpentStars: spentStars,
-    totalEarnedStars: earnedStars,
-    monthSpentStars,
-    monthEarnedStars,
+    monthExchangeStars,
+    monthNet,
     categoryStats,
   };
 }
@@ -240,26 +254,27 @@ function renderSummaryPage() {
       <div class="big-star-count">${stats.remainingStars}</div>
       <div class="big-star-label">剩余星星</div>
     </div>
-    
+
+    <!-- 本月统计 - 四宫格 -->
     <div class="stats-grid">
       <div class="stat-item">
+        <div class="stat-label">本月获得</div>
+        <div class="stat-value positive">+${stats.monthRewardStars}</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">本月扣减</div>
+        <div class="stat-value negative">-${stats.monthDeductStars}</div>
+      </div>
+      <div class="stat-item">
         <div class="stat-label">本月兑换</div>
-        <div class="stat-value">${stats.monthExchangeCount}</div>
+        <div class="stat-value negative">-${stats.monthExchangeStars}</div>
       </div>
       <div class="stat-item">
-        <div class="stat-label">消耗星星</div>
-        <div class="stat-value negative">${stats.monthSpentStars}</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-label">本月奖励</div>
-        <div class="stat-value">${stats.monthRewardCount}</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-label">获得星星</div>
-        <div class="stat-value positive">${stats.monthEarnedStars}</div>
+        <div class="stat-label">本月净增</div>
+        <div class="stat-value" style="${stats.monthNet >= 0 ? 'color:var(--primary);' : 'color:var(--danger);'}">${stats.monthNet >= 0 ? '+' : ''}${stats.monthNet}</div>
       </div>
     </div>
-    
+
     <div class="action-buttons">
       <button class="btn btn-primary btn-full" onclick="showAddRewardModal()">
         <svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px;">
@@ -274,20 +289,20 @@ function renderSummaryPage() {
         星星兑换
       </button>
     </div>
-    
+
     <div class="card">
       <div class="card-title">分类统计</div>
       <div class="category-scroll">
         ${categoryCards}
       </div>
     </div>
-    
+
     <div class="card">
       <div class="card-title">最近记录</div>
       <div class="tabs">
         <div class="tab active" data-tab="reward" onclick="switchRecordTab('reward')">奖励</div>
-        <div class="tab" data-tab="exchange" onclick="switchRecordTab('exchange')">兑换</div>
         <div class="tab" data-tab="deduct" onclick="switchRecordTab('deduct')">扣减</div>
+        <div class="tab" data-tab="exchange" onclick="switchRecordTab('exchange')">兑换</div>
       </div>
       <div class="record-list" id="summaryRecordList"></div>
     </div>
@@ -454,6 +469,7 @@ function renderDataPage() {
       <div class="card-title">数据详情</div>
       <div class="tabs">
         <div class="tab active" data-tab="rewardData" onclick="switchDataTab('rewardData')">奖励记录</div>
+        <div class="tab" data-tab="deductData" onclick="switchDataTab('deductData')">扣减记录</div>
         <div class="tab" data-tab="exchangeData" onclick="switchDataTab('exchangeData')">兑换记录</div>
       </div>
       <div id="dataStatsPanel"></div>
